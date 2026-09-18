@@ -61,14 +61,12 @@ intents.message_content = True
 bot = commands.Bot(command_prefix=",", intents=intents, help_command=None)
 
 
-def is_owner_or_admin(ctx: commands.Context) -> bool:
-    return ctx.author.id in OWNER_IDS or (
-        isinstance(ctx.author, discord.Member) and ctx.author.guild_permissions.administrator
-    )
+def is_owner(ctx: commands.Context) -> bool:
+    return ctx.author.id in OWNER_IDS
 
 
 def can_generate(ctx: commands.Context) -> bool:
-    if ctx.author.id in whitelisted_users or is_owner_or_admin(ctx):
+    if ctx.author.id in whitelisted_users or is_owner(ctx):
         return True
     return isinstance(ctx.author, discord.Member) and any(
         role.id in whitelisted_roles for role in ctx.author.roles
@@ -135,8 +133,8 @@ def extract_keys(payload: object) -> list[str]:
 @bot.group(name="whitelist", invoke_without_command=True)
 async def whitelist_command(ctx: commands.Context) -> None:
     """Manage users allowed to run ,spoof."""
-    if not is_owner_or_admin(ctx):
-        await ctx.reply("Only the bot owner or a server administrator can manage the whitelist.", mention_author=False)
+    if not is_owner(ctx):
+        await ctx.reply("Only the configured bot owner can manage the whitelist.", mention_author=False)
         return
     if not ctx.message.role_mentions and not ctx.message.mentions:
         await ctx.reply("Usage: `,whitelist @role` or `,whitelist @user`.", mention_author=False)
@@ -155,8 +153,8 @@ async def whitelist_command(ctx: commands.Context) -> None:
 
 @whitelist_command.command(name="list")
 async def whitelist_list(ctx: commands.Context) -> None:
-    if not is_owner_or_admin(ctx):
-        await ctx.reply("Only the bot owner or a server administrator can manage the whitelist.", mention_author=False)
+    if not is_owner(ctx):
+        await ctx.reply("Only the configured bot owner can manage the whitelist.", mention_author=False)
         return
     users = ", ".join(f"<@{user_id}>" for user_id in sorted(whitelisted_users)) or "none"
     roles = ", ".join(f"<@&{role_id}>" for role_id in sorted(whitelisted_roles)) or "none"
@@ -165,8 +163,8 @@ async def whitelist_list(ctx: commands.Context) -> None:
 
 @bot.command(name="unwhitelist")
 async def unwhitelist(ctx: commands.Context) -> None:
-    if not is_owner_or_admin(ctx):
-        await ctx.reply("Only the bot owner or a server administrator can manage the whitelist.", mention_author=False)
+    if not is_owner(ctx):
+        await ctx.reply("Only the configured bot owner can manage the whitelist.", mention_author=False)
         return
     if ctx.message.role_mentions:
         role = ctx.message.role_mentions[0]
