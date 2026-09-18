@@ -255,57 +255,95 @@ async def unwhitelist(ctx: commands.Context) -> None:
     save_whitelist(whitelisted_users, whitelisted_roles)
 
 
+async def admin_requests(path: str, payload: dict) -> list[dict]:
+    bases = {service_url.split("/admin/", 1)[0].rstrip("/") for service_url in (API_URL, COLOR_API_URL)}
+    results = []
+    timeout = aiohttp.ClientTimeout(total=30)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        for base_url in bases:
+            try:
+                async with session.post(f"{base_url}/admin/{path}", json={"secret": API_SECRET, **payload}) as response:
+                    body = await response.json(content_type=None)
+                    results.append({"status": response.status, "body": body, "base": base_url})
+            except (aiohttp.ClientError, TimeoutError, json.JSONDecodeError):
+                continue
+    return results
+
+
 @bot.command(name="hwid")
-async def hwid(ctx: commands.Context, key: str, action: str | None = None) -> None:
-    """Display or reset a license's device binding on either service."""
+async def hwid(ctx: commands.Context, first: str, second: str | None = None) -> None:
+    """Display/reset a key HWID, or ban/unban an HWID."""
     if not is_owner(ctx):
         return
-    if action and action.lower() != "reset":
-        await ctx.reply("Usage: `,hwid <key>` or `,hwid <key> reset`.", mention_author=False)
+    if first.lower() in {"ban", "unban"}:
+        if not second:
+            await ctx.reply("Usage: `,hwid ban <hwid>` or `,hwid unban <hwid>`.", mention_author=False)
+            return
+        path = "ban-hwid" if first.lower() == "ban" else "unban-hwid"
+        results = await admin_requests(path, {"hwid": second})
+        if any(result["body"].get("ok") is True for result in results):
+            await ctx.reply("HWID banned and linked keys deleted." if path == "ban-hwid" else "HWID unbanned.", mention_author=False)
+        else:
+            await ctx.reply("The HWID request failed.", mention_author=False)
         return
 
-    service_bases = set()
-    for service_url in (API_URL, COLOR_API_URL):
-        service_bases.add(service_url.split("/admin/", 1)[0].rstrip("/"))
+    key = first
+    if second and second.lower() != "reset":
+        await ctx.reply("Usage: `,hwid <key>`, `,hwid <key> reset`, `,hwid ban <hwid>`.", mention_author=False)
+        return
+    if second:
+        results = await admin_requests("reset", {"key": key, "license": key})
+        await ctx.reply("HWID reset." if any(result["body"].get("ok") is True for result in results) else "That key was not found.", mention_author=False)
+        return
 
-    timeout = aiohttp.ClientTimeout(total=30)
+    results = await admin_requests("list", {})
+    matches = [record for result in results for record in result["body"].get("licenses", [])
+               if str(record.get("key") or record.get("license") or "").upper() == key.upper()]
+    if not matches:
+        await ctx.reply("That key was not found.", mention_author=False)
+        return
+    bound = next((record.get("hwid") for record in matches if record.get("hwid")), None)
     try:
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            if action and action.lower() == "reset":
-                successes = 0
-                for base_url in service_bases:
-                    async with session.post(f"{base_url}/admin/reset", json={"secret": API_SECRET, "key": key, "license": key}) as response:
-                        if response.status < 400:
-                            payload = await response.json(content_type=None)
-                            if payload.get("ok") is True:
-                                successes += 1
-                await ctx.reply("HWID reset." if successes else "That key was not found on the configured services.", mention_author=False)
-                return
+        await ctx.author.send(f"HWID for `{key}`: `{bound}`" if bound else f"No HWID is bound to `{key}`.")
+        await ctx.reply("I sent the HWID to your DMs.", mention_author=False)
+    except discord.Forbidden:
+        await ctx.reply("I could not DM you the HWID.", mention_author=False)
 
-            matches = []
-            for base_url in service_bases:
-                async with session.post(f"{base_url}/admin/list", json={"secret": API_SECRET}) as response:
-                    if response.status >= 400:
-                        continue
-                    payload = await response.json(content_type=None)
-                    for record in payload.get("licenses", []):
-                        record_key = str(record.get("key") or record.get("license") or "")
-                        if record_key.upper() == key.upper():
-                            matches.append(record)
-    except (aiohttp.ClientError, TimeoutError) as exc:
-        print(f"HWID lookup request failed: {exc}")
-        await ctx.reply("Could not reach the license services.", mention_author=False)
+
+@bot.command(name="key")
+async def key_command(ctx: commands.Context, action: str | None = None, key: str | None = None) -> None:
+    if not is_owner(ctx):
+        return
+    if action is None:
+        results = await admin_requests("list", {})
+        records = [record for result in results for record in result["body"].get("licenses", [])]
+        if not records:
+            await ctx.reply("No keys found.", mention_author=False)
+            return
+        lines = []
+        seen = set()
+        for record in records:
+            value = str(record.get("key") or record.get("license") or "")
+            if not value or value in seen:
+                continue
+            seen.add(value)
+            status = "VALID" if record.get("valid", not record.get("paused", False)) else "INVALID"
+            lines.append(f"{status} {value}")
+        text = "\n".join(lines)
+        for start in range(0, len(text), 1900):
+            await ctx.send(text[start:start + 1900])
         return
 
-    if matches:
-        bound = next((record.get("hwid") for record in matches if record.get("hwid")), None)
-        try:
-            await ctx.author.send(f"HWID for `{key}`: `{bound}`" if bound else f"No HWID is bound to `{key}`.")
-            await ctx.reply("I sent the HWID to your DMs.", mention_author=False)
-        except discord.Forbidden:
-            await ctx.reply("I could not DM you the HWID. Enable DMs from server members.", mention_author=False)
-    else:
-        await ctx.reply("That key was not found on the configured services.", mention_author=False)
+    if action.lower() not in {"delete", "pause", "unpause"} or not key:
+        await ctx.reply("Usage: `,key`, `,key delete <key>`, `,key pause <key>`, `,key unpause <key>`.", mention_author=False)
+        return
+    results = await admin_requests(action.lower(), {"key": key, "license": key})
+    await ctx.reply(f"Key {action.lower()}d." if any(result["body"].get("ok") is True for result in results) else "That key was not found.", mention_author=False)
+
+
+@bot.command(name="cmds")
+async def cmds(ctx: commands.Context) -> None:
+    await ctx.send(",spoof\n,color\n,whitelist\n,unwhitelist\n,hwid\n,key\n,cmds")
 
 
 @bot.event
