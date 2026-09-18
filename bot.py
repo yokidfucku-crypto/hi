@@ -255,6 +255,47 @@ async def unwhitelist(ctx: commands.Context) -> None:
     save_whitelist(whitelisted_users, whitelisted_roles)
 
 
+@bot.command(name="hwid")
+async def hwid(ctx: commands.Context, key: str, action: str) -> None:
+    """Reset a license's device binding on either configured service."""
+    if not is_owner(ctx):
+        return
+    if action.lower() != "reset":
+        await ctx.reply("Usage: `,hwid <key> reset`.", mention_author=False)
+        return
+
+    reset_urls = set()
+    for service_url in (API_URL, COLOR_API_URL):
+        base_url = service_url.split("/admin/", 1)[0].rstrip("/")
+        reset_urls.add(f"{base_url}/admin/reset")
+
+    successes = 0
+    timeout = aiohttp.ClientTimeout(total=30)
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            for reset_url in reset_urls:
+                async with session.post(
+                    reset_url,
+                    json={"secret": API_SECRET, "key": key, "license": key},
+                ) as response:
+                    if response.status < 400:
+                        try:
+                            payload = await response.json()
+                        except (aiohttp.ContentTypeError, json.JSONDecodeError):
+                            payload = {}
+                        if payload.get("ok") is True:
+                            successes += 1
+    except (aiohttp.ClientError, TimeoutError) as exc:
+        print(f"HWID reset request failed: {exc}")
+        await ctx.reply("Could not reach the license services.", mention_author=False)
+        return
+
+    if successes:
+        await ctx.reply("HWID reset.", mention_author=False)
+    else:
+        await ctx.reply("That key was not found on the configured services.", mention_author=False)
+
+
 @bot.event
 async def on_command_error(ctx: commands.Context, error: commands.CommandError) -> None:
     if isinstance(error, commands.MissingRequiredArgument):
