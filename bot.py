@@ -310,7 +310,7 @@ async def hwid(ctx: commands.Context, first: str, second: str | None = None) -> 
         await ctx.reply("I could not DM you the HWID.", mention_author=False)
 
 
-@bot.command(name="key")
+@bot.command(name="key", aliases=["keys"])
 async def key_command(ctx: commands.Context, action: str | None = None, key: str | None = None) -> None:
     if not is_owner(ctx):
         return
