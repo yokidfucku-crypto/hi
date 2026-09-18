@@ -382,7 +382,45 @@ async def deletefile(ctx: commands.Context) -> None:
 
 @bot.command(name="cmds")
 async def cmds(ctx: commands.Context) -> None:
-    await ctx.send(",spoof\n,color\n,whitelist\n,unwhitelist\n,hwid\n,key\n,key deletefile\n,cmds")
+    await ctx.send(",spoof\n,color\n,whitelist\n,unwhitelist\n,hwid\n,key\n,key deletefile\n,how color\n,faq color\n,cmds")
+
+
+@bot.command(name="how")
+async def how(ctx: commands.Context, product: str | None = None) -> None:
+    if product is None or product.lower() != "color":
+        await ctx.reply("Usage: `,how color`.", mention_author=False)
+        return
+    await ctx.send(
+        "**How to run KuroShift**\n\n"
+        "1. Download **kuroshift.exe**.\n"
+        "2. Double-click it to launch.\n"
+        "3. Click **Yes** when Windows asks for administrator permission.\n"
+        "4. Paste your license key and click **enter** once.\n"
+        "5. Wait for verification, then customize your settings.\n\n"
+        "No installation or extraction needed. Your activation saves automatically."
+    )
+
+
+@bot.command(name="faq")
+async def faq(ctx: commands.Context, product: str | None = None) -> None:
+    if product is None or product.lower() != "color":
+        await ctx.reply("Usage: `,faq color`.", mention_author=False)
+        return
+    await ctx.send(
+        "**KuroShift FAQ**\n\n"
+        "**How do I run it?**\n"
+        "Open **kuroshift.exe**, allow administrator access, and enter your license key.\n\n"
+        "**Do I need to enter my key every time?**\n"
+        "No, your activation saves automatically.\n\n"
+        "**It says “Checking…”—what do I do?**\n"
+        "Wait for it to finish. Only click once.\n\n"
+        "**My key isn’t working.**\n"
+        "Check the key and your internet connection, then try again.\n\n"
+        "**My key is bound to another machine.**\n"
+        "Contact support for an HWID reset.\n\n"
+        "**Will resetting settings remove my activation?**\n"
+        "No, resetting settings or switching profiles keeps you activated."
+    )
 
 
 @bot.event
