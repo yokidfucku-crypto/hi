@@ -256,42 +256,54 @@ async def unwhitelist(ctx: commands.Context) -> None:
 
 
 @bot.command(name="hwid")
-async def hwid(ctx: commands.Context, key: str, action: str) -> None:
-    """Reset a license's device binding on either configured service."""
+async def hwid(ctx: commands.Context, key: str, action: str | None = None) -> None:
+    """Display or reset a license's device binding on either service."""
     if not is_owner(ctx):
         return
-    if action.lower() != "reset":
-        await ctx.reply("Usage: `,hwid <key> reset`.", mention_author=False)
+    if action and action.lower() != "reset":
+        await ctx.reply("Usage: `,hwid <key>` or `,hwid <key> reset`.", mention_author=False)
         return
 
-    reset_urls = set()
+    service_bases = set()
     for service_url in (API_URL, COLOR_API_URL):
-        base_url = service_url.split("/admin/", 1)[0].rstrip("/")
-        reset_urls.add(f"{base_url}/admin/reset")
+        service_bases.add(service_url.split("/admin/", 1)[0].rstrip("/"))
 
-    successes = 0
     timeout = aiohttp.ClientTimeout(total=30)
     try:
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            for reset_url in reset_urls:
-                async with session.post(
-                    reset_url,
-                    json={"secret": API_SECRET, "key": key, "license": key},
-                ) as response:
-                    if response.status < 400:
-                        try:
-                            payload = await response.json()
-                        except (aiohttp.ContentTypeError, json.JSONDecodeError):
-                            payload = {}
-                        if payload.get("ok") is True:
-                            successes += 1
+            if action and action.lower() == "reset":
+                successes = 0
+                for base_url in service_bases:
+                    async with session.post(f"{base_url}/admin/reset", json={"secret": API_SECRET, "key": key, "license": key}) as response:
+                        if response.status < 400:
+                            payload = await response.json(content_type=None)
+                            if payload.get("ok") is True:
+                                successes += 1
+                await ctx.reply("HWID reset." if successes else "That key was not found on the configured services.", mention_author=False)
+                return
+
+            matches = []
+            for base_url in service_bases:
+                async with session.post(f"{base_url}/admin/list", json={"secret": API_SECRET}) as response:
+                    if response.status >= 400:
+                        continue
+                    payload = await response.json(content_type=None)
+                    for record in payload.get("licenses", []):
+                        record_key = str(record.get("key") or record.get("license") or "")
+                        if record_key.upper() == key.upper():
+                            matches.append(record)
     except (aiohttp.ClientError, TimeoutError) as exc:
-        print(f"HWID reset request failed: {exc}")
+        print(f"HWID lookup request failed: {exc}")
         await ctx.reply("Could not reach the license services.", mention_author=False)
         return
 
-    if successes:
-        await ctx.reply("HWID reset.", mention_author=False)
+    if matches:
+        bound = next((record.get("hwid") for record in matches if record.get("hwid")), None)
+        try:
+            await ctx.author.send(f"HWID for `{key}`: `{bound}`" if bound else f"No HWID is bound to `{key}`.")
+            await ctx.reply("I sent the HWID to your DMs.", mention_author=False)
+        except discord.Forbidden:
+            await ctx.reply("I could not DM you the HWID. Enable DMs from server members.", mention_author=False)
     else:
         await ctx.reply("That key was not found on the configured services.", mention_author=False)
 
