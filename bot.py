@@ -24,6 +24,8 @@ BOT_TOKEN = os.environ["DISCORD_BOT_TOKEN"]
 API_SECRET = os.environ["LICENSE_API_SECRET"]
 API_URL = os.environ["LICENSE_API_URL"]
 COLOR_API_URL = os.environ["COLOR_API_URL"]
+SPOOF_EXE_SOURCE_CHANNEL_ID = int(os.getenv("SPOOF_EXE_SOURCE_CHANNEL_ID", "0"))
+COLOR_EXE_SOURCE_CHANNEL_ID = int(os.getenv("COLOR_EXE_SOURCE_CHANNEL_ID", "0"))
 MAX_COUNT = int(os.getenv("MAX_KEY_COUNT", "100"))
 DATA_FILE = Path(os.getenv("WHITELIST_FILE", "whitelist.json"))
 
@@ -77,9 +79,17 @@ async def on_ready() -> None:
 
 
 @bot.command(name="spoof")
-async def spoof(ctx: commands.Context, count: int = 1) -> None:
+async def spoof(ctx: commands.Context, count_or_action: str = "1") -> None:
     """Generate keys and send them to the channel where the command was used."""
     if not can_generate(ctx):
+        return
+    if count_or_action.lower() == "exe":
+        await forward_latest_exe(ctx, SPOOF_EXE_SOURCE_CHANNEL_ID)
+        return
+    try:
+        count = int(count_or_action)
+    except ValueError:
+        await ctx.reply("Usage: `,spoof`, `,spoof 5`, or `,spoof exe`.", mention_author=False)
         return
     if count < 1 or count > MAX_COUNT:
         await ctx.reply(f"Count must be between 1 and {MAX_COUNT}.", mention_author=False)
@@ -111,9 +121,13 @@ async def spoof(ctx: commands.Context, count: int = 1) -> None:
 
 
 @bot.command(name="color")
-async def color(ctx: commands.Context) -> None:
+async def color(ctx: commands.Context, action: str | None = None) -> None:
     """Generate a color key using the second service."""
     if not can_generate(ctx):
+        return
+
+    if action and action.lower() == "exe":
+        await forward_latest_exe(ctx, COLOR_EXE_SOURCE_CHANNEL_ID)
         return
 
     async with ctx.typing():
@@ -141,17 +155,48 @@ async def color(ctx: commands.Context) -> None:
         await ctx.reply("The color service returned no key.", mention_author=False)
 
 
+async def forward_latest_exe(ctx: commands.Context, source_channel_id: int) -> None:
+    if not source_channel_id:
+        await ctx.reply("The source channel for this service is not configured.", mention_author=False)
+        return
+    source = bot.get_channel(source_channel_id)
+    if not isinstance(source, discord.TextChannel):
+        await ctx.reply("The configured EXE source channel could not be found.", mention_author=False)
+        return
+
+    async for message in source.history(limit=100):
+        exe_attachments = [
+            attachment for attachment in message.attachments
+            if attachment.filename.lower().endswith(".exe")
+        ]
+        if not exe_attachments:
+            continue
+        try:
+            files = [await attachment.to_file(spoiler=False) for attachment in exe_attachments]
+            await ctx.send(content=message.content or None, files=files)
+        except discord.HTTPException:
+            await ctx.reply("Discord could not upload that file. Check its size and bot permissions.", mention_author=False)
+        return
+
+    await ctx.reply("No .exe file was found in the configured source channel.", mention_author=False)
+
+
 def extract_keys(payload: object) -> list[str]:
     """Handle common JSON response shapes from license APIs."""
     if isinstance(payload, list):
-        return [str(item) for item in payload]
+        keys: list[str] = []
+        for item in payload:
+            keys.extend(extract_keys(item))
+        return keys
     if isinstance(payload, str):
         return [line.strip() for line in payload.splitlines() if line.strip()]
     if isinstance(payload, dict):
+        if "key" in payload:
+            return [str(payload["key"])]
         for field in ("keys", "licenses", "results", "data"):
             if field in payload:
                 return extract_keys(payload[field])
-        for field in ("key", "license"):
+        for field in ("license",):
             if field in payload:
                 return [str(payload[field])]
     return []
