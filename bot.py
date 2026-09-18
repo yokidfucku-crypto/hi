@@ -22,10 +22,8 @@ load_dotenv()
 
 BOT_TOKEN = os.environ["DISCORD_BOT_TOKEN"]
 API_SECRET = os.environ["LICENSE_API_SECRET"]
-API_URL = os.getenv(
-    "LICENSE_API_URL",
-    "https://muispoof-license.yourllytried.workers.dev/admin/generate",
-)
+API_URL = os.environ["LICENSE_API_URL"]
+COLOR_API_URL = os.environ["COLOR_API_URL"]
 MAX_COUNT = int(os.getenv("MAX_KEY_COUNT", "100"))
 DATA_FILE = Path(os.getenv("WHITELIST_FILE", "whitelist.json"))
 
@@ -82,7 +80,6 @@ async def on_ready() -> None:
 async def spoof(ctx: commands.Context, count: int = 1) -> None:
     """Generate keys and send them to the channel where the command was used."""
     if not can_generate(ctx):
-        await ctx.reply("You are not whitelisted to generate keys.", mention_author=False)
         return
     if count < 1 or count > MAX_COUNT:
         await ctx.reply(f"Count must be between 1 and {MAX_COUNT}.", mention_author=False)
@@ -110,8 +107,38 @@ async def spoof(ctx: commands.Context, count: int = 1) -> None:
     if not keys:
         await ctx.reply("The key service returned no keys.", mention_author=False)
         return
-    message = "\n".join(f"`{key}`" for key in keys)
-    await ctx.send(f"Generated {len(keys)} key{'s' if len(keys) != 1 else ''}:\n{message}")
+    await ctx.send("\n".join(keys))
+
+
+@bot.command(name="color")
+async def color(ctx: commands.Context) -> None:
+    """Generate a color key using the second service."""
+    if not can_generate(ctx):
+        return
+
+    async with ctx.typing():
+        try:
+            timeout = aiohttp.ClientTimeout(total=30)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(COLOR_API_URL, json={"secret": API_SECRET}) as response:
+                    body = await response.text()
+                    if response.status >= 400:
+                        await ctx.reply(f"Color service returned HTTP {response.status}.", mention_author=False)
+                        return
+                    try:
+                        payload = json.loads(body)
+                    except json.JSONDecodeError:
+                        payload = body
+        except (aiohttp.ClientError, TimeoutError) as exc:
+            print(f"Color API request failed: {exc}")
+            await ctx.reply("Could not reach the color service. Try again later.", mention_author=False)
+            return
+
+    keys = extract_keys(payload)
+    if keys:
+        await ctx.send("\n".join(keys))
+    else:
+        await ctx.reply("The color service returned no key.", mention_author=False)
 
 
 def extract_keys(payload: object) -> list[str]:
