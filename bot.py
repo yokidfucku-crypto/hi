@@ -173,7 +173,10 @@ async def forward_latest_exe(ctx: commands.Context, source_channel_id: int) -> N
             continue
         try:
             files = [await attachment.to_file(spoiler=False) for attachment in exe_attachments]
-            await ctx.send(content=message.content or None, files=files)
+            posted_at = int(message.created_at.timestamp())
+            timestamp_line = f"Posted: <t:{posted_at}:F>"
+            content = f"{timestamp_line}\n{message.content}" if message.content else timestamp_line
+            await ctx.send(content=content, files=files)
         except discord.HTTPException:
             await ctx.reply("Discord could not upload that file. Check its size and bot permissions.", mention_author=False)
         return
