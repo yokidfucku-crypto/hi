@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 
 import aiohttp
@@ -310,7 +311,7 @@ async def hwid(ctx: commands.Context, first: str, second: str | None = None) -> 
         await ctx.reply("I could not DM you the HWID.", mention_author=False)
 
 
-@bot.command(name="key", aliases=["keys"])
+@bot.group(name="key", aliases=["keys"], invoke_without_command=True)
 async def key_command(ctx: commands.Context, action: str | None = None, key: str | None = None) -> None:
     if not is_owner(ctx):
         return
@@ -341,9 +342,47 @@ async def key_command(ctx: commands.Context, action: str | None = None, key: str
     await ctx.reply(f"Key {action.lower()}d." if any(result["body"].get("ok") is True for result in results) else "That key was not found.", mention_author=False)
 
 
+@key_command.command(name="deletefile")
+async def deletefile(ctx: commands.Context) -> None:
+    if not is_owner(ctx):
+        return
+    if not ctx.message.attachments:
+        await ctx.reply("Attach a .txt file containing the keys, then run `,key deletefile`.", mention_author=False)
+        return
+    attachment = ctx.message.attachments[0]
+    if not attachment.filename.lower().endswith((".txt", ".log", ".csv")):
+        await ctx.reply("Attach a .txt, .log, or .csv file containing the keys.", mention_author=False)
+        return
+    try:
+        raw = await attachment.read()
+        text = raw.decode("utf-8", errors="ignore")
+    except (discord.HTTPException, UnicodeError):
+        await ctx.reply("I could not read that attachment.", mention_author=False)
+        return
+
+    patterns = (
+        r"(?:KURO|EGO)-[0-9A-Z]{3}-[0-9A-Z]{5}-[0-9A-Z]",
+        r"(?:KURO|MSP)-[0-9A-F]{32}-[0-9A-F]{16}",
+    )
+    keys = list(dict.fromkeys(match for pattern in patterns for match in re.findall(pattern, text, re.IGNORECASE)))
+    if not keys:
+        await ctx.reply("No supported license keys were found.", mention_author=False)
+        return
+    if len(keys) > 500:
+        await ctx.reply("The file contains more than 500 keys. Split it into smaller files.", mention_author=False)
+        return
+
+    deleted = 0
+    for license_key in keys:
+        results = await admin_requests("delete", {"key": license_key, "license": license_key})
+        if any(result["body"].get("ok") is True for result in results):
+            deleted += 1
+    await ctx.reply(f"Deleted {deleted} of {len(keys)} keys.", mention_author=False)
+
+
 @bot.command(name="cmds")
 async def cmds(ctx: commands.Context) -> None:
-    await ctx.send(",spoof\n,color\n,whitelist\n,unwhitelist\n,hwid\n,key\n,cmds")
+    await ctx.send(",spoof\n,color\n,whitelist\n,unwhitelist\n,hwid\n,key\n,key deletefile\n,cmds")
 
 
 @bot.event
